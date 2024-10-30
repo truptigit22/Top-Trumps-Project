@@ -1,0 +1,197 @@
+import random
+import pygame
+import json
+import requests
+from io import BytesIO
+from typing import List, Dict, Optional, Any
+from pygame.locals import QUIT, MOUSEBUTTONDOWN
+
+
+# Initialize Pygame
+pygame.init()
+pygame.mixer.init()
+
+# Set up display
+SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+pygame.display.set_caption("Pokémon Showdown")
+
+# Load sounds
+pygame.mixer.music.load('background_music.mp3')
+pygame.mixer.music.play(-1)  # Loop background music
+win_sound = pygame.mixer.Sound('win_sound.wav.mp3')
+lose_sound = pygame.mixer.Sound('lose_sound.wav.mp3')
+
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+
+
+# Function to fetch Pokémon data
+def get_pokemon_data(pokemon_id: int) -> Optional[Dict[str, Any]]:
+    url = f"https://pokeapi.co/api/v2/pokemon/{pokemon_id}"
+    response = requests.get(url)
+    try:
+        pokemon = response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching Pokémon data: {e}")
+        return None
+
+    return {
+        "name": pokemon["name"],
+        "id": pokemon["id"],
+        "height": pokemon["height"],
+        "weight": pokemon.get("weight"),
+        "stats": {stat["stat"]["name"]: stat["base_stat"] for stat in pokemon["stats"]},
+        "sprite": f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/{pokemon['id']}.png"
+    }
+
+
+# Function to load Pokémon images
+def load_pokemon_image(url: str) -> Optional[pygame.Surface]:
+    try:
+        response = requests.get(url)
+        image = pygame.image.load(BytesIO(response.content))
+        return pygame.transform.scale(image, (200, 200))  # Resize for display
+    except Exception as e:
+        print(f"Failed to load Pokémon image: {e}")
+        return None
+
+
+# Function to display Pokémon on the screen
+def display_pokemon(available_pokemon: List[Dict[str, Any]]):
+    screen.fill(WHITE)
+    x_positions = [100, 300, 500]  # Positions for Pokémon images
+
+    for i, pokemon in enumerate(available_pokemon):
+        if pokemon:
+            image = load_pokemon_image(pokemon["sprite"])
+            if image:
+                screen.blit(image, (x_positions[i], 200))  # Display Pokémon images
+                font = pygame.font.Font(None, 36)
+                text = font.render(pokemon["name"], True, BLACK)
+                screen.blit(text, (x_positions[i], 400))
+
+    pygame.display.update()  # Update the display
+
+
+# Function to handle Pokémon selection
+def choose_pokemon(available_pokemon: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    display_pokemon(available_pokemon)
+    selected_pokemon = None
+
+    while not selected_pokemon:
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == MOUSEBUTTONDOWN:
+                x, y = event.pos
+                if 100 <= x <= 300 and 200 <= y <= 400:
+                    selected_pokemon = available_pokemon[0]
+                elif 300 <= x <= 500 and 200 <= y <= 400:
+                    selected_pokemon = available_pokemon[1]
+                elif 500 <= x <= 700 and 200 <= y <= 400:
+                    selected_pokemon = available_pokemon[2]
+                if selected_pokemon:
+                    print(f"You selected {selected_pokemon['name']}!")
+                    return selected_pokemon
+
+
+# Function to display the result
+def display_result(result: str):
+    screen.fill(WHITE)
+    font = pygame.font.Font(None, 72)
+    result_text = font.render(result, True, BLACK)
+    screen.blit(result_text, (SCREEN_WIDTH // 2 - result_text.get_width() // 2, SCREEN_HEIGHT // 2 - 50))
+    pygame.display.update()
+    pygame.time.wait(2000)
+
+
+# Function to choose a stat for the showdown
+def choose_stat(pokemon: Dict[str, Any]) -> str:
+    available_stats = list(pokemon["stats"].keys()) + ["id", "height", "weight"]
+    print(f"Available stats: {', '.join(available_stats)}")
+    stat = input("Which stat do you want to use?: ").lower()
+    return stat
+
+
+# Function to update high scores
+def update_high_scores(player_name: str, wins: int):
+    try:
+        with open("high_scores.json", "r") as file:
+            high_scores = json.load(file)
+    except FileNotFoundError:
+        high_scores = {}
+
+    if player_name in high_scores:
+        high_scores[player_name] += wins
+    else:
+        high_scores[player_name] = wins
+
+    with open("high_scores.json", "w") as file:
+        json.dump(high_scores, file)
+
+
+# Main game loop
+def play_game():
+    player_name = input("Enter your name: ").capitalize()
+    wins, losses, ties = 0, 0, 0
+
+    while True:
+        available_pokemon = [get_pokemon_data(random.randint(1, 151)) for _ in range(3)]
+        player_pokemon = choose_pokemon(available_pokemon)
+        chosen_stat = choose_stat(player_pokemon)
+
+        opponent_pokemon = get_pokemon_data(random.randint(1, 151))
+        print(f"Opponent's Pokémon: {opponent_pokemon['name']}")
+
+        player_value = player_pokemon.get("stats", {}).get(chosen_stat, 0)
+        opponent_value = opponent_pokemon.get("stats", {}).get(chosen_stat, 0)
+
+        if player_value > opponent_value:
+            result = "You win!"
+            wins += 1
+            win_sound.play()
+        elif player_value < opponent_value:
+            result = "You lose!"
+            losses += 1
+            lose_sound.play()
+        else:
+            result = "It's a tie!"
+            ties += 1
+
+        display_result(result)
+
+        update_high_scores(player_name, wins)
+        play_again = input("Play again? (y/n): ").lower()
+        if play_again != "y":
+            break
+
+    print(f"Game summary - Wins: {wins}, Losses: {losses}, Ties: {ties}")
+
+
+# Main function
+def main():
+    while True:
+        mode = input("Choose mode: (1) Play Game, (2) Display High Scores, (q) Quit: ")
+        if mode == "1":
+            play_game()
+        elif mode == "2":
+            try:
+                with open("high_scores.json", "r") as file:
+                    high_scores = json.load(file)
+                    print("High Scores:")
+                    for player, score in high_scores.items():
+                        print(f"{player}: {score} wins")
+            except FileNotFoundError:
+                print("No high scores available.")
+        elif mode.lower() == "q":
+            pygame.quit()
+            exit()
+        else:
+            print("Invalid mode. Choose 1, 2, or q.")
+
+
+if __name__ == "__main__":
+    main()
